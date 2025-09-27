@@ -1,6 +1,7 @@
 const joystick = document.getElementById("joystick");
 const stick = document.getElementById("stick");
 const maxDistance = 80;
+const fireButton = document.getElementById("fire");
 
 let dragging = false;
 
@@ -61,6 +62,10 @@ joystick.addEventListener("pointermove", (e) => {
 
 joystick.addEventListener("pointerup", resetStick);
 joystick.addEventListener("pointerleave", resetStick);
+
+fireButton.addEventListener("click", () => {
+    console.log("FIRE");
+})
 
 function resetStick() {
   dragging = false;
