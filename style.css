@@ -6,7 +6,34 @@ body {
     background: #f0f0f0;
 }
 
-.joystick {
+.buttons {
+    display: flex;
+    justify-content: space-evenly;
+    width: 100%;
+}
+
+.fire:active {
+    background: rgb(183, 69, 69);
+    transform: scale(0.95);
+}
+
+.fire {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.no-select {
+    user-select: none;
+    font-family: 'Roboto', sans-serif;
+}
+
+#fireText {
+    color:black;
+    font-size: 40px;
+}
+
+.joystick, .fire {
     width: 200px;
     height: 200px;
     border-radius: 50%;
