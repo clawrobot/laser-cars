@@ -1,9 +1,16 @@
+* {
+    font-family: 'Roboto', sans-serif;
+}
+
 body {
     display: flex;
     justify-content: center;
     align-items: center;
+    gap: 100px;
     height: 100vh;
     background: #f0f0f0;
+    flex-direction: column;
+    
 }
 
 .buttons {
@@ -25,7 +32,6 @@ body {
 
 .no-select {
     user-select: none;
-    font-family: 'Roboto', sans-serif;
 }
 
 #fireText {
@@ -52,4 +58,72 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+}
+
+/* Info panel container */
+.info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background: #fff;
+    border-radius: 12px;
+    width: 90%;
+    min-height: 150px;
+    max-width: 800px;
+    margin-bottom: 20px;
+    padding: 0 40px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+/* Each item inside info */
+.hud-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: max-content;
+}
+
+.hud-label {
+    font-size: 12px;
+    color: #666;
+    letter-spacing: 0.3px;
+}
+
+.hud-value {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+/* Connected indicator */
+.status-dot {
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+}
+.status-dot.on {
+    background: rgba(70,211,105,0.15);
+    color: #46d369;
+}
+.status-dot.off {
+    background: rgba(255,90,95,0.15);
+    color: #ff5a5f;
+}
+
+/* Speed slider */
+#speed {
+    width: 150px;
+}
+
+/* Responsive */
+@media (max-width: 700px) {
+    .info {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #speed {
+        width: 100%;
+    }
 }

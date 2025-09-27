@@ -71,3 +71,4 @@ function resetStick() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) resetStick();
 });
+

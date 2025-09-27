@@ -9,16 +9,36 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="info">
+  <div class="info">
+    <div class="hud-item">
+      <span class="hud-label">Battery</span>
+      <span id="battery" class="hud-value">--%</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">Health</span>
+      <span id="health" class="hud-value">3</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">Connected</span>
+      <span id="isConnected" class="status-dot off">No</span>
+    </div>
+    <div class="hud-item">
+      <label for="speed" class="hud-label">Speed</label>
+      <input id="speed" type="range" min="0" max="100" value="60" />
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">Score</span>
+      <span id="score" class="hud-value">0</span>
+    </div>
+  </div>
 
+  <div class="buttons">
+    <div class="joystick" id="joystick">
+      <div class="stick" id="stick"></div>
     </div>
-    <div class="buttons">
-        <div class="joystick" id="joystick">
-            <div class="stick" id="stick"></div>
-        </div>
-        <div class="fire" id="fire">
-            <p id="fireText" class="no-select">FIRE</p>
-        </div>
+    <div class="fire" id="fire">
+      <p id="fireText" class="no-select">FIRE</p>
     </div>
+  </div>
 </body>
 </html>
