@@ -37,27 +37,75 @@ body {
 #fireText {
     color:black;
     font-size: 40px;
+    /* hide the text when using a static image asset for FIRE */
+    display: none;
+}
+
+/* show an image inside the fire button using a pseudo-element so HTML doesn't need to change
+   place your image at assets/fire.png */
+#fire::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 128px; /* adjust to taste */
+    height: 128px;
+    background-image: url('assets/fire.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    pointer-events: none; /* allow clicks to pass to the button */
 }
 
 .joystick, .fire {
     width: 200px;
     height: 200px;
-    border-radius: 50%;
-    background: #ddd;
-    border: 3px solid #aaa;
+    background-color: transparent; /* fallback color if no image provided */
     position: relative;
-    touch-action: none;
+    touch-action: none; /* keep the movable stick visually inside the circular base */
 }
+
+
 
 .stick {
     width: 80px;
     height: 80px;
-    border-radius: 50%;
-    background: #666;
+    /* Use pixel-art image for the movable stick. Put your image at assets/joystick.png */
+    background-color: transparent; /* fallback */
+    background-image: url('assets/joystick.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain; /* use 'cover' to fully fill and crop, or 'contain' to show whole image */
+    /* Keep pixel art crisp when scaled */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+}
+
+/* Use a separate image for the joystick base (place at assets/joystick-base.png) */
+#joystick {
+    background-image: url('assets/joystick-base.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover; /* fill and crop to the circular area */
+    image-rendering: pixelated; /* keep pixel art crisp */
+    image-rendering: crisp-edges;
+}
+
+/* Use the same base image for the fire button */
+#fire {
+    background-image: url('assets/joystick-base.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
 
 /* Info panel container */
