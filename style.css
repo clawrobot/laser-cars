@@ -20,7 +20,7 @@ body {
 }
 
 .fire:active {
-    background: rgb(183, 69, 69);
+    background-image: url('assets/fire-pressed.png');
     transform: scale(0.95);
 }
 
@@ -107,6 +107,10 @@ body {
     background-size: cover;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
+}
+
+#fire:active {
+    background-image: url('assets/fire-pressed.png');
 }
 
 /* Info panel container */
