@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RC Car Controller</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="app.js" defer></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RC Car Controller</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
 </head>
-
 <body>
-
   <div class="info">
     <div class="hud-item">
       <span class="hud-label">Battery</span>
@@ -21,10 +20,10 @@
     </div>
     <div class="hud-item">
       <span class="hud-label">Connected</span>
-      <span id="isConnected" class="status-dot off">Disconnected</span>
+      <span id="isConnected" class="status-dot off">No</span>
     </div>
     <div class="hud-item">
-      <label class="hud-label" for="speed">Speed</label>
+      <label for="speed" class="hud-label">Speed</label>
       <input id="speed" type="range" min="0" max="100" value="60" />
     </div>
     <div class="hud-item">
@@ -41,6 +40,5 @@
       <p id="fireText" class="no-select">FIRE</p>
     </div>
   </div>
-
 </body>
 </html>
