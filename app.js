@@ -43,7 +43,9 @@ connectWebSocket();
 let dragging = false;
 const DEAD = 0.25;
 const SEND_HZ = 15;
-let lastSentMs = 0;
+// track time of the last actual send (ms). Initialize to now so watchdog
+// doesn't trigger immediately on page load.
+let lastSentMs = performance.now();
 let lastCmd = "S";
 
 function chooseCommand(nx, ny) {
@@ -59,8 +61,11 @@ function send(cmd) {
   lastCmd = cmd;
   console.log("SEND:", cmd);
 
-  if (wsConnected && ws.readyState === WebSocket.OPEN)
+  if (wsConnected && ws.readyState === WebSocket.OPEN) {
     ws.send(cmd);
+    // record the time a message was actually sent
+    lastSentMs = performance.now();
+  }
 }
 
 speedSlider.addEventListener("input", (e) => {
@@ -81,6 +86,35 @@ speedSlider.addEventListener("input", (e) => {
     ws.send(`SPEED:${motorSpeed}`);
   }
 });
+
+// Force-send a command regardless of lastCmd (used by watchdog)
+function sendForced(cmd) {
+  lastCmd = cmd;
+  console.log("FORCED SEND:", cmd);
+  if (wsConnected && ws.readyState === WebSocket.OPEN) {
+    ws.send(cmd);
+  }
+  lastSentMs = performance.now();
+}
+
+// Watchdog: if nothing was sent for 75 seconds, send a safety 'S' command.
+const WATCHDOG_INTERVAL_MS = 10 * 1000; // check every 10s
+const WATCHDOG_TIMEOUT_MS = 75 * 1000; // 1 minute 15 seconds
+setInterval(() => {
+  const now = performance.now();
+  if (now - lastSentMs >= WATCHDOG_TIMEOUT_MS) {
+    // Only try to send when connected; if disconnected the reconnect logic
+    // will attempt to restore connection.
+    if (wsConnected && ws && ws.readyState === WebSocket.OPEN) {
+      sendForced('S');
+    } else {
+      // If not connected, still update lastSentMs to avoid spamming attempts
+      // while connection is down — we'll let reconnect logic handle it.
+      lastSentMs = now;
+      console.log('Watchdog: no connection, skipping forced send');
+    }
+  }
+}, WATCHDOG_INTERVAL_MS);
 
 joystick.addEventListener("pointerdown", () => (dragging = true));
 
