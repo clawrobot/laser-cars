@@ -10,10 +10,12 @@
 #include <ESPAsyncWebServer.h>
 
 // ===== MOTOR PINS =====
-#define MOTOR_LEFT_FWD    26
+#define MOTOR_LEFT_FWD    25
 #define MOTOR_LEFT_BWD    27
 #define MOTOR_RIGHT_FWD   32
 #define MOTOR_RIGHT_BWD   33
+#define MOTOR_LEFT_SPD    19
+#define MOTOR_RIGHT_SPD   18
 
 // ===== LASER PIN =====
 #define LASER_PIN         13
@@ -31,6 +33,7 @@ AsyncWebSocket ws("/ws");
 // ===== STATUS TRACKING =====
 unsigned long lastStatusUpdate = 0;
 const unsigned long STATUS_UPDATE_INTERVAL = 2000;
+int motorSpeed = 200;
 
 // ===== FUNCTION DECLARATIONS =====
 void initLittleFS();
@@ -42,7 +45,9 @@ void moveBackward();
 void turnLeft();
 void turnRight();
 void fireLaser();
+void changeSpd(motorSpeed);
 void sendStatusUpdate();
+
 
 void setup() {
   Serial.begin(115200);
@@ -142,6 +147,13 @@ void handleCommand(String cmd) {
   else if (cmd == "R") turnRight();
   else if (cmd == "S") stopMotors();
   else if (cmd == "FIRE") fireLaser();
+  else if (cmd.startsWith("SPEED:")){
+    int newSpeed = cmd.substring(6).toInt();
+    if(newSpeed >= 0 && newSpeed <= 255){
+      motorSpeed = newSpeed;
+      Serial.printf("Speed set to: %d\n", motorSpeed);
+    }
+    changeSpd(motorSpeed);
   else Serial.println("Unknown command: " + cmd);
 }
 
@@ -193,6 +205,11 @@ void fireLaser() {
   delay(300);
   digitalWrite(LASER_PIN, LOW);
   ws.textAll("LASER_FIRED");
+}
+
+void changSpd(int n){
+    analogWrite(19, n);
+    analogWrite(18, n);
 }
 
 void sendStatusUpdate() {
