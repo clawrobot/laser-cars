@@ -45,7 +45,7 @@ void moveBackward();
 void turnLeft();
 void turnRight();
 void fireLaser();
-void changeSpd(motorSpeed);
+void changeSpd(int motorSpeed);
 void sendStatusUpdate();
 
 
@@ -154,6 +154,7 @@ void handleCommand(String cmd) {
       Serial.printf("Speed set to: %d\n", motorSpeed);
     }
     changeSpd(motorSpeed);
+  }
   else Serial.println("Unknown command: " + cmd);
 }
 
@@ -164,6 +165,7 @@ void stopMotors() {
   digitalWrite(MOTOR_LEFT_BWD, LOW);
   digitalWrite(MOTOR_RIGHT_FWD, LOW);
   digitalWrite(MOTOR_RIGHT_BWD, LOW);
+  changeSpd(0);
   Serial.println("STOP");
 }
 
@@ -172,6 +174,7 @@ void moveForward() {
   digitalWrite(MOTOR_LEFT_BWD, LOW);
   digitalWrite(MOTOR_RIGHT_FWD, HIGH);
   digitalWrite(MOTOR_RIGHT_BWD, LOW);
+  changeSpd(motorSpeed);
   Serial.println("FORWARD");
 }
 
@@ -180,6 +183,7 @@ void moveBackward() {
   digitalWrite(MOTOR_LEFT_BWD, HIGH);
   digitalWrite(MOTOR_RIGHT_FWD, LOW);
   digitalWrite(MOTOR_RIGHT_BWD, HIGH);
+  changeSpd(motorSpeed);
   Serial.println("BACKWARD");
 }
 
@@ -188,6 +192,7 @@ void turnLeft() {
   digitalWrite(MOTOR_LEFT_BWD, HIGH);
   digitalWrite(MOTOR_RIGHT_FWD, HIGH);
   digitalWrite(MOTOR_RIGHT_BWD, LOW);
+  changeSpd(motorSpeed);
   Serial.println("LEFT");
 }
 
@@ -196,6 +201,7 @@ void turnRight() {
   digitalWrite(MOTOR_LEFT_BWD, LOW);
   digitalWrite(MOTOR_RIGHT_FWD, LOW);
   digitalWrite(MOTOR_RIGHT_BWD, HIGH);
+  changeSpd(motorSpeed);
   Serial.println("RIGHT");
 }
 
@@ -207,7 +213,7 @@ void fireLaser() {
   ws.textAll("LASER_FIRED");
 }
 
-void changSpd(int n){
+void changeSpd(int n){
     analogWrite(19, n);
     analogWrite(18, n);
 }
