@@ -27,8 +27,25 @@ function connectWebSocket() {
   };
 
   ws.onerror = (e) => console.error("WS Error", e);
-  ws.onmessage = (event) => console.log("ESP32:", event.data);
-}
+  ws.onmessage = (event) => {
+    console.log("ESP32:", event.data);
+
+    // Handles hit detection
+    if(event.data === "HIT"){
+      document.body.style.background = "red";
+
+      //Show hit message
+      const health = document.getElementById("health");
+      const currentHealth = parseInt(health.textContent);
+      if(currentHealth > 0){
+        health.textContent = currentHealth - 1;
+      }
+      setTimeout(() => {
+        document.body.style.background = "#f0f0f0";
+      }, 3000);
+    }
+  }
+};
 
 function updateConnectionStatus(status) {
   const el = document.getElementById("isConnected");
