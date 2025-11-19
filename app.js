@@ -2,7 +2,9 @@
 const joystick = document.getElementById("joystick");
 const stick = document.getElementById("stick");
 const fireButton = document.getElementById("fire");
+const speedSlider = document.getElementById("speed")
 const maxDistance = 80;
+let motorSpeed = 199;
 
 // WebSocket
 let ws = null;
@@ -60,6 +62,25 @@ function send(cmd) {
   if (wsConnected && ws.readyState === WebSocket.OPEN)
     ws.send(cmd);
 }
+
+speedSlider.addEventListener("input", (e) => {
+  const sliderVal = parseInt(e.target.value);
+  const sliderMin = parseInt(speedSlider.min);
+  const sliderMax = parseInt(speedSlider.max);
+
+  //Conversts value to percentage(0-100) -> Motor Speed
+  const percentage = ((sliderVal - sliderMin) / (sliderMax - sliderMin))*100;
+  motorSpeed = Math.floor((percentage/100)*255);
+  
+  //Update displays
+  speedPercent.textContent = Math.round(percentage);
+  motorValue.textContent = motorSpeed;
+
+  //Sends info to webSocket
+  if(wsConnected && ws.readyState === WebSocket.OPEN){
+    ws.send(`SPEED:${motorSpeed}`);
+  }
+});
 
 joystick.addEventListener("pointerdown", () => (dragging = true));
 
