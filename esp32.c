@@ -30,22 +30,14 @@
 // ==== PCNT CONFIGURATION ====
 #define PCNT_HIT_UNIT    PCNT_UNIT_0
 #define PCNT_INPUT_SIG_IO LASER_READ_HIT //GPIO 34
-#define PCNT_EVT_CTRL_IO  -1             //Not using an external control pin
-
-// ===== TIMER CONFIGURATION =====
-#define TIMER_DIVIDER        16000  //16000 for 10ms gate time (80MHz(PCNT clock) / 16000 = 5kHz)
-#define TIMER_SCALE          (80000000 / TIMER_DIVIDER)  //5000 ticks per second
-#define TIMER_INTERVAL_SEC   0.01 // 10ms interval
-#define TIMER_GROUP         TIMER_GROUP_0
-#define TIMER_IDX           TIMER_0
 
 // ===== Player Frequencies (Hz) =====
-#define PLAYER1_FREQUENCY_HZ  5000
-#define PLAYER2_FREQUENCY_HZ  4000
-#define PLAYER3_FREQUENCY_HZ  3000
-#define PLAYER4_FREQUENCY_HZ  2000
-#define PLAYER5_FREQUENCY_HZ  1000
-#define FREQUENCY_TOLERANCE_HZ 50 // +/- tolerance
+#define PLAYER1_FREQUENCY_HZ    5000
+#define PLAYER2_FREQUENCY_HZ    4000
+#define PLAYER3_FREQUENCY_HZ    3000
+#define PLAYER4_FREQUENCY_HZ    2000
+#define PLAYER5_FREQUENCY_HZ    1000
+#define FREQUENCY_TOLERANCE_HZ  50     // +/- tolerance
 
 // ===== WiFi AP SETTINGS =====
 #define AP_SSID           "RC_Car"
@@ -70,7 +62,10 @@ int currentFrequencyHz = 5000; //5 kHz
 unsigned long lastLaserFiredTime = 0;
 const unsigned long laserFireDuration = 300; // milliseconds
 volatile bool frequencyReady = false;
-volatile int pulseCount = 0;
+volatile int16_t pulseCount = 0;
+volatile unsigned long measurementStartTime = 0;
+volatile unsigned long measurementStopTime = 0;
+String playerCode = "HIT_UNKNOWN";
 
 // ===== Interrupts =====
 void IRAM_ATTR hitDetected();
@@ -91,7 +86,8 @@ void startLaserSignal();
 void stopLaserSignal();
 void fireLaser();
 bool isDisabled();
-void whoHitMe();
+void whoHitMe(int frequency_int);
+void checkHitSignalEnd();
 void sendStatusUpdate();
 
 //Initializes pins and sets up WebSocket
@@ -135,64 +131,42 @@ void loop() {
   ws.cleanupClients();
   unsigned long now = millis();
 
-  if (isHit && (millis() - hitTime < 100)) { // React immediately to hits
-    //Stop motors and notify clients and start frequency measurement
-    detachInterrupt(digitalPinToInterrupt(LASER_INTERRUPT)); // Disable further interrupts temporarily
-    stopMotors();
-    ws.textAll("HIT");
-    whoHitMe(); //Start PCNT
-    attachInterrupt(digitalPinToInterrupt(LASER_INTERRUPT), hitDetected, FALLING); // Re-enable interrupts
-  }
+  //Check if hit signal ended and frequency can be read
+  checkHitSignalEnd();
 
-  // PCNT Frequency Check
-  if (frequencyReady) {
-    timer_pause(TIMER_GROUP, TIMER_IDX);
-    //Calculate frequency (Pulses / Gate Time)
-    float measuredFrequency_Hz = (float)pulseCount / TIMER_INTERVAL_SEC;
-    int frequency_int = round(measuredFrequency_Hz);
-    Serial.printf("Measured Frequency: %d Hz (Count: %d)\n", frequency_int, pulseCount);
-    //Player Code Check (1kHz to 5kHz range)
-    if(abs(frequency_int - PLAYER1_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ){
-      Serial.println("Hit by Player 1!");
-      ws.textAll("HIT_BY_P1");
-    }
-    else if(abs(frequency_int - PLAYER2_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ){
-      Serial.println("Hit by Player 2!");
-      ws.textAll("HIT_BY_P2");
-    }
-    else if(abs(frequency_int - PLAYER3_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ){
-      Serial.println("Hit by Player 3!");
-      ws.textAll("HIT_BY _P3");
-    }
-    else if(abs(frequency_int - PLAYER4_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ){
-      Serial.println("Hit by Player 4!");
-      ws.textAll("HIT_BY_P4");
-    }
-    else if(abs(frequency_int - PLAYER5_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ){
-      Serial.println("Hit by Player 5!");
-      ws.textAll("HIT_BY_P5");
-    }
-    else{
-      Serial.println("Hit by Unknown Frequency!");
+  //Process frequency reading
+  if (frequencyReady){
+    unsigned long measurementDuration_ms = measurementStopTime - measurementStartTime;
+    if(measurementDuration_ms == 0) {
+      Serial.println("Error: Measurement duration was zero.");
       ws.textAll("HIT_UNKNOWN");
+    } else {
+      float measuredFrequency_Hz = (float)pulseCount / ((float)measurementDuration_ms / 1000.0);
+      int frequency_int = round(measuredFrequency_Hz);
+      Serial.printf("Measured Frequency: %d Hz (Pulses: %d, Duration: %lu ms)\n",
+         frequency_int, pulseCount, measurementDuration_ms);
+      whoHitMe(frequency_int);
+      ws.textAll(playerCode);
     }
-    frequencyReady = false;
-    // ---- END PCNT FREQUENCY CHECK ----
-    if(now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL){
-      sendStatusUpdate();
-      lastStatusUpdate = now;
-    }
-    //Laser stop logic
-    if(now - lastLaserFiredTime > laserFireDuration && lastLaserFiredTime != 0){
-      stopLaserSignal();
-      lastLaserFiredTime = 0;
-    }
+    frequencyReady = false; //Reset flag
+  }
+  //Cooldown Check and Re-enable
+  if(isDisabled() && (now - hitTime >= coolDown)){
+    //Cooldown expired, re-enable tank
+    isHit = false;
+    Serial.println("Tank re-enabled after cooldown.");
+    ws.textAll("READY");
   }
 
-  unsigned long now = millis();
-  if (now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL) {
+  //Status Update
+  if(now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL){
     sendStatusUpdate();
     lastStatusUpdate = now;
+  }
+  //Laser stop logic (for the car's own firing)
+  if(lastLaserFiredTime != 0 && (now - lastLaserFiredTime > laserFireDuration)){
+    stopLaserSignal();
+    lastLaserFiredTime = 0; //Reset
   }
 }
 
@@ -250,60 +224,45 @@ void initWebSocket() {
 void initPCNTFrequencyReader() {
   pcnt_config_t pcnt_config = {
     .pulse_gpio_num = PCNT_INPUT_SIG_IO,
-    .ctrl_gpio_num = PCNT_EVT_CTRL_IO,
+    .ctrl_gpio_num = -1, // Not using control pin
     .lctrl_mode = PCNT_MODE_REVERSE,  //No control, just set to reverse
     .hctrl_mode = PCNT_MODE_KEEP,  // Control mode not used
     .pos_mode = PCNT_COUNT_INC,   // Count on rising edge
     .neg_mode = PCNT_COUNT_DIS,   // Do not count on falling edge
-    .counter_h_lim = 0,
-    .counter_l_lim = 0,
     .unit = PCNT_HIT_UNIT,
     .channel = PCNT_CHANNEL_0,
   };
   pcnt_unit_config(&pcnt_config);
-  pcnt_filter_enable(PCNT_UNIT_HIT);
-  pcnt_set_filter_value(PCNT_UNIT_HIT, 100); // Filter out pulses shorter than 100us
-  pcnt_counter_pause(PCNT_UNIT_HIT);
-  pcnt_counter_clear(PCNT_UNIT_HIT);
+  pcnt_filter_enable(PCNT_HIT_UNIT);
+  pcnt_set_filter_value(PCNT_HIT_UNIT, 100); // Filter out pulses shorter than 100us
+  //IMPORTANT: Keep the counter paused, it will be started by the ISR
+  pcnt_counter_pause(PCNT_HIT_UNIT);
+  pcnt_counter_clear(PCNT_HIT_UNIT);
   Serial.println("PCNT initialized for GPIO 34");
 
-  //Configure timer for measurement gate
-  timer_config_t config = {
-    .alarm_en = TIMER_ALARM_EN,
-    .counter_en = TIMER_PAUSE,
-    .intr_type = TIMER_INTR_LEVEL,
-    .counter_dir = TIMER_COUNT_UP,
-    .auto_reload = TIMER_AUTORELOAD_EN,
-    .divider = TIMER_DIVIDER
-  };
-  timer_init(TIMER_GROUP, TIMER_IDX, &config);
-  timer_set_counter_value(TIMER_GROUP, TIMER_IDX, 0);
-  //Set alarm to trigger every 100ms
-  timer_set_alarm_value(TIMER_GROUP, TIMER_IDX, TIMER_INTERVAL_SEC * TIMER_SCALE);
-  timer_enable_intr(TIMER_GROUP, TIMER_IDX);
-  timer_isr_register(TIMER_GROUP, TIMER_IDX, timer_isr, NULL, ESP_INTR_FLAG_IRAM, NULL);
+  
 }
 
 // ===== INTERRUPTS =====
 void IRAM_ATTR hitDetected(){
-  isHit = true;
-  hitTime = millis();
+  if(!isHit){
+    //Stops motors
+    digitalWrite(MOTOR_LEFT_FWD, LOW);
+    digitalWrite(MOTOR_LEFT_BWD, LOW);
+    digitalWrite(MOTOR_RIGHT_FWD, LOW);
+    digitalWrite(MOTOR_RIGHT_BWD, LOW);
+    //Stops Laser Pulse
+    ledcWrite(LEDC_CHANNEL, 0); // Turn off laser
+    //Starts to caputre incoming signal frequency
+    pcnt_counter_clear(PCNT_UNIT_0);
+    pcnt_counter_resume(PCNT_UNIT_0);
+    //Set flags for the main loop
+    isHit = true;
+    hitTime = millis();
+    measurementStartTime = hitTime;
+  }
 }
 
-//ISR to read the count
-void IRAM_ATTR timer_isr(void *arg){
-  //Clear the interrupt
-  TIMERG0.int_clr_timers.t0 = 1;
-
-  //Stop and read PCNT
-  pcnt_counter_pause(PCNT_HIT_UNIT);
-  pcnt_get_counter_value(PCNT_HIT_UNIT, &pulseCount);
-  pcnt_counter_clear(PCNT_HIT_UNIT);
-  frequencyReady = true;
-
-  //Re-enable alarm
-  TIMERG0.hw_timer[TIMER_IDX].config.alarm_en = TIMER_ALARM_EN;
-}
 
 // ===== COMMAND HANDLER =====
 void handleCommand(String cmd) {
@@ -389,7 +348,7 @@ void setupLaserPWM() {
   Serial.printf("LEDC configured on GPIO %d at %d Hz.\n", LASER_PIN, currentFrequencyHz);
 }
 
-void startLaserSginal(){
+void startLaserSignal(){
   ledcWrite(LEDC_CHANNEL, LEDC_DUTY); // Turn on laser with specified duty cycle
   Serial.printf("Laser signal started at %d Hz.\n", currentFrequencyHz);
   ws.textAll("LASER_STARTED");
@@ -402,18 +361,11 @@ void stopLaserSignal(){
 }
 
 void fireLaser() {
-  Serial.println("FIRE LASER");
-  lastLaserFiredTime = millis();
-  if(laserFireDuration > millis() - lastLaserFiredTime){
-    startLaserSginal();
-    while(LaserFireDuration < millis() - lastLaserFiredTime){
-      // Wait for duration
-    }
-    stopLaserSignal();
+  if(lastLaserFiredTime == 0 && !isDisabled()){
+    Serial.println("FIRE LASER");
+    lastLaserFiredTime = millis();
+    startLaserSignal();
     ws.textAll("LASER_FIRED");
-  }
-  else{
-    return;
   }
 }
 
@@ -421,19 +373,39 @@ bool isDisabled() {
   if (isHit && (millis() - hitTime < coolDown)) {
     return true;
   }
-  if (isHit && (millis() - hitTime >= coolDown)) {
-    isHit = false; // Re-enable after timeout
-  }
   return false;
 }
 
-void whoHitMe() {
-  frequencyReady = false;
-  pulseCount = 0;
-  //Start the PCNT counter and the timer
-  pcnt_counter_resume(PCNT_HIT_UNIT);
-  timer_start(TIMER_GROUP, TIMER_IDX);
-  Serial.println("PCNT measurement started...");
+void whoHitMe(int frequency_int){
+  if (abs(frequency_int - PLAYER1_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
+      playerCode = "HIT_BY_P1";
+  } else if (abs(frequency_int - PLAYER2_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
+      playerCode = "HIT_BY_P2";
+  } else if (abs(frequency_int - PLAYER3_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
+      playerCode = "HIT_BY_P3";
+  } else if (abs(frequency_int - PLAYER4_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
+      playerCode = "HIT_BY_P4";
+  } else if (abs(frequency_int - PLAYER5_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
+      playerCode = "HIT_BY_P5";
+  }
+}
+
+void checkHitSignalEnd(){
+  if(isHit&& !frequencyReady){
+    unsigned long now = millis();
+    if((now - measurementStartTime > laserFireDuration + 50) || 
+       (digitalRead(LASER_READ_HIT) == LOW && (now - measurementStartTime > 50))){
+        //Stop PCNT and read frequency
+        pcnt_counter_pause(PCNT_UNIT_0);
+        pcnt_get_counter_value(PCNT_UNIT_0, (int16_t*)&pulseCount); //Use defined unit and cast to int16_t*
+        measurementStopTime = now;
+        //Set processing flag
+        frequencyReady = true;
+        //Clear PCNT for next hit (will remain cleared until the next hitDetected ISR runs)
+        pcnt_counter_clear(PCNT_UNIT_0);
+        Serial.println("Hit signal end detected. Reading count.");
+    }
+  }
 }
 
 void sendStatusUpdate() {
