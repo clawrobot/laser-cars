@@ -11,7 +11,7 @@
 #include "driver/pcnt.h"
 #include "driver/timer.h"
 
-// ===== MOTOR PINS =====
+// ===== MOTOR PINS =====================================================================================================================
 #define MOTOR_LEFT_FWD    25
 #define MOTOR_LEFT_BWD    27
 #define MOTOR_RIGHT_FWD   32
@@ -19,27 +19,15 @@
 #define MOTOR_LEFT_SPD    19
 #define MOTOR_RIGHT_SPD   18
 
-// ===== LASER PIN =====
+// ===== PLAYER ID ======
+#define PLAYER_ID 0
+
+// ===== LASER PIN =====================================================================================================================
 #define LASER_PIN         16
 #define LASER_READ_HIT    34
 #define LASER_INTERRUPT   35
-#define LEDC_CHANNEL       0  // LEDC channel for PWM
-#define LEDC_RESOLUTION   10  // 10-bit resolution for PWM
-#define LEDC_DUTY         512 // 50% duty cycle
 
-// ==== PCNT CONFIGURATION ====
-#define PCNT_HIT_UNIT    PCNT_UNIT_0
-#define PCNT_INPUT_SIG_IO LASER_READ_HIT //GPIO 34
-
-// ===== Player Frequencies (Hz) =====
-#define PLAYER1_FREQUENCY_HZ    5000
-#define PLAYER2_FREQUENCY_HZ    4000
-#define PLAYER3_FREQUENCY_HZ    3000
-#define PLAYER4_FREQUENCY_HZ    2000
-#define PLAYER5_FREQUENCY_HZ    1000
-#define FREQUENCY_TOLERANCE_HZ  50     // +/- tolerance
-
-// ===== WiFi AP SETTINGS =====
+// ===== WiFi AP SETTINGS ==============================================================================================================
 #define AP_SSID           "RC_Car"
 #define AP_PASS           "RCCar123"
 IPAddress local_IP(192, 168, 4, 1);
@@ -49,31 +37,30 @@ IPAddress subnet(255, 255, 255, 0);
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-// ===== STATUS TRACKING =====
+// ===== STATUS TRACKING ==============================================================================================================
 unsigned long lastStatusUpdate = 0;
 const unsigned long STATUS_UPDATE_INTERVAL = 2000;
 
-// ===== Global Variables =====
+// ===== Global Variables ==============================================================================================================
 int motorSpeed = 200;
 volatile bool isHit = false;
 volatile unsigned long hitTime = 0;
 const unsigned long coolDown = 3000;
-int currentFrequencyHz = 5000; //5 kHz
-unsigned long lastLaserFiredTime = 0;
-const unsigned long laserFireDuration = 300; // milliseconds
-volatile bool frequencyReady = false;
-volatile int16_t pulseCount = 0;
-volatile unsigned long measurementStartTime = 0;
-volatile unsigned long measurementStopTime = 0;
-String playerCode = "HIT_UNKNOWN";
+  //Packet Decoding
+volatile uint32_t last_time = 0;
+volatile uint32_t duration = 0;
+bool header_received = false;
+int bit_count = 0;
+uint8_t received_data = 0;
+volatile uint8_t final_value = 0;
+volatile bool new_data_ready = false;
 
-// ===== Interrupts =====
-void IRAM_ATTR hitDetected();
+// ===== Interrupts =====================================================================================================================
+void IRAM_ATTR hit_detected_isr();
 
-// ===== FUNCTION DECLARATIONS =====
+// ===== FUNCTION DECLARATIONS ==========================================================================================================
 void initLittleFS();
 void initWebSocket();
-void initPCNTFrequencyReader();
 void handleCommand(String cmd);
 void stopMotors();
 void moveForward();
@@ -81,13 +68,7 @@ void moveBackward();
 void turnLeft();
 void turnRight();
 void setSpeed(int motorSpeed);
-void setupLaserPWM();
-void startLaserSignal();
-void stopLaserSignal();
-void fireLaser();
 bool isDisabled();
-void whoHitMe(int frequency_int);
-void checkHitSignalEnd();
 void sendStatusUpdate();
 
 //Initializes pins and sets up WebSocket
@@ -100,13 +81,9 @@ void setup() {
   pinMode(MOTOR_RIGHT_FWD, OUTPUT);
   pinMode(MOTOR_RIGHT_BWD, OUTPUT);
 
-  pinMode(LASER_PIN, OUTPUT);
-  digitalWrite(LASER_PIN, LOW);
   pinMode(LASER_INTERRUPT, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(LASER_INTERRUPT), hitDetected, FALLING);
-  pinMode(LASER_READ_HIT, INPUT);
-  setupLaserPWM();
-  initPCNTFrequencyReader();
+  // 'CHANGE' triggers the ISR on both rising and falling edges
+  attachInterrupt(digitalPinToInterrupt(LASER_INTERRUPT), hit_detected_isr, CHANGE);
   
   stopMotors();
   initLittleFS();
@@ -121,34 +98,31 @@ void setup() {
 
   // Serve website correctly
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-
   server.begin();
   Serial.println("Web server started!");
 }
 
-//Removes old disconnected connections
+
 void loop() {
-  ws.cleanupClients();
+  ws.cleanupClients();  //Removes old disconnected connections
   unsigned long now = millis();
 
-  //Check if hit signal ended and frequency can be read
-  checkHitSignalEnd();
+  // If we saw a header but 100ms has passed without finishing the packet
+  if (header_received && (micros() - last_time > 100000)) {
+      header_received = false;
+      bit_count = 0;
+      Serial.println("Packet Timeout - Resetting");
+  }
 
-  //Process frequency reading
-  if (frequencyReady){
-    unsigned long measurementDuration_ms = measurementStopTime - measurementStartTime;
-    if(measurementDuration_ms == 0) {
-      Serial.println("Error: Measurement duration was zero.");
-      ws.textAll("HIT_UNKNOWN");
-    } else {
-      float measuredFrequency_Hz = (float)pulseCount / ((float)measurementDuration_ms / 1000.0);
-      int frequency_int = round(measuredFrequency_Hz);
-      Serial.printf("Measured Frequency: %d Hz (Pulses: %d, Duration: %lu ms)\n",
-         frequency_int, pulseCount, measurementDuration_ms);
-      whoHitMe(frequency_int);
-      ws.textAll(playerCode);
-    }
-    frequencyReady = false; //Reset flag
+  if (new_data_ready) {
+    isHit = true;
+    hitTime = millis();
+    //Stop Motors Immediately
+    stopMotors();
+    String hitmsg = "HIT_BY_P" + String(final_value + 1);
+    ws.textAll(hitmsg);
+    Serial.println("Hit received from ID: " + String(final_value));
+    new_data_ready = false;
   }
   //Cooldown Check and Re-enable
   if(isDisabled() && (now - hitTime >= coolDown)){
@@ -163,108 +137,46 @@ void loop() {
     sendStatusUpdate();
     lastStatusUpdate = now;
   }
-  //Laser stop logic (for the car's own firing)
-  if(lastLaserFiredTime != 0 && (now - lastLaserFiredTime > laserFireDuration)){
-    stopLaserSignal();
-    lastLaserFiredTime = 0; //Reset
-  }
 }
 
-//Checks if Website uploaded correctly
-void initLittleFS() {
-  if (!LittleFS.begin()) {
-    Serial.println("LittleFS mount failed!");
-  } else {
-    Serial.println("LittleFS mounted successfully");
-  }
-}
+// ===== INTERRUPTS ==================================================================================================================
+void IRAM_ATTR hit_detected_isr(){
+  uint32_t now = micros();
+  duration = now - last_time;
+  last_time = now;
 
-//Starts WebSocket
-void initWebSocket() {
-  ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client,
-                AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  bool pin_state = digitalRead(LASER_INTERRUPT); //High is space, Low is Mark
 
-    switch (type) {
-
-      case WS_EVT_CONNECT:
-        Serial.printf("Client #%u connected\n", client->id());
-        stopMotors();
-        sendStatusUpdate();
-        break;
-
-      case WS_EVT_DISCONNECT:
-        Serial.printf("Client #%u disconnected\n", client->id());
-        stopMotors();
-        break;
-
-      case WS_EVT_DATA: {
-        AwsFrameInfo *info = (AwsFrameInfo*)arg;
-
-        if (info->final && info->index == 0 && info->len == len) {
-          String cmd = "";
-          cmd.reserve(len);
-
-          for (size_t i = 0; i < len; i++) {
-            cmd += (char)data[i];
-          }
-
-          cmd.trim();
-          Serial.println("Received: " + cmd);
-          handleCommand(cmd);
+  if(pin_state == HIGH) { // We just finished a MARK (Laser Pulse)
+        if (duration > 1800 && duration < 2200) { 
+            header_received = true; 
+            bit_count = 0;
+            received_data = 0;
         }
-        break;
-      }
-
-    } // switch end
-  });
-
-  server.addHandler(&ws);
+    } else { // We just finished a SPACE (Gap)
+        if (header_received) {
+            if (duration > 300 && duration < 500) {
+                // Logic 0 detected
+                received_data <<= 1;
+                bit_count++;
+            } else if (duration > 1000 && duration < 1400) {
+                // Logic 1 detected
+                received_data = (received_data << 1) | 1;
+                bit_count++;
+            }
+        }
+    }
+    if (bit_count == 2) { 
+        // Success! Handle your 2-bit hit data here
+        final_value = received_data; // Transfer the 2-bit number
+        new_data_ready = true;        // Flag for the main loop
+        header_received = false;
+        bit_count = 0;
+        received_data = 0;
+    }
 }
 
-void initPCNTFrequencyReader() {
-  pcnt_config_t pcnt_config = {
-    .pulse_gpio_num = PCNT_INPUT_SIG_IO,
-    .ctrl_gpio_num = -1, // Not using control pin
-    .lctrl_mode = PCNT_MODE_REVERSE,  //No control, just set to reverse
-    .hctrl_mode = PCNT_MODE_KEEP,  // Control mode not used
-    .pos_mode = PCNT_COUNT_INC,   // Count on rising edge
-    .neg_mode = PCNT_COUNT_DIS,   // Do not count on falling edge
-    .unit = PCNT_HIT_UNIT,
-    .channel = PCNT_CHANNEL_0,
-  };
-  pcnt_unit_config(&pcnt_config);
-  pcnt_filter_enable(PCNT_HIT_UNIT);
-  pcnt_set_filter_value(PCNT_HIT_UNIT, 100); // Filter out pulses shorter than 100us
-  //IMPORTANT: Keep the counter paused, it will be started by the ISR
-  pcnt_counter_pause(PCNT_HIT_UNIT);
-  pcnt_counter_clear(PCNT_HIT_UNIT);
-  Serial.println("PCNT initialized for GPIO 34");
-
-  
-}
-
-// ===== INTERRUPTS =====
-void IRAM_ATTR hitDetected(){
-  if(!isHit){
-    //Stops motors
-    digitalWrite(MOTOR_LEFT_FWD, LOW);
-    digitalWrite(MOTOR_LEFT_BWD, LOW);
-    digitalWrite(MOTOR_RIGHT_FWD, LOW);
-    digitalWrite(MOTOR_RIGHT_BWD, LOW);
-    //Stops Laser Pulse
-    ledcWrite(LEDC_CHANNEL, 0); // Turn off laser
-    //Starts to caputre incoming signal frequency
-    pcnt_counter_clear(PCNT_UNIT_0);
-    pcnt_counter_resume(PCNT_UNIT_0);
-    //Set flags for the main loop
-    isHit = true;
-    hitTime = millis();
-    measurementStartTime = hitTime;
-  }
-}
-
-
-// ===== COMMAND HANDLER =====
+// ===== COMMAND HANDLER ==============================================================================================================
 void handleCommand(String cmd) {
   if (isDisabled()) {
     Serial.println("Commands disabled - tank was hit!");
@@ -288,7 +200,7 @@ void handleCommand(String cmd) {
   else Serial.println("Unknown command: " + cmd);
 }
 
-// ===== MOTOR CONTROL =====
+// ===== MOTOR CONTROL ===============================================================================================================
 void stopMotors() {
   digitalWrite(MOTOR_LEFT_FWD, LOW);
   digitalWrite(MOTOR_LEFT_BWD, LOW);
@@ -335,40 +247,13 @@ void turnRight() {
 }
 
 void setSpeed(int speed){
-    analogWrite(19, speed);
-    analogWrite(18, speed);
+    analogWrite(MOTOR_LEFT_SPD, speed);
+    analogWrite(MOTOR_RIGHT_SPD, speed);
 }
 
-//===== LASER CONTROLS =====
-void setupLaserPWM() {
-  // Configure LEDC timer for frequency 
-  ledcSetup(LEDC_CHANNEL, currentFrequencyHz, LEDC_RESOLUTION);
-  ledcAttachPin(LASER_PIN, LEDC_CHANNEL);
-  ledcWrite(LEDC_CHANNEL, 0); // Start with laser off
-  Serial.printf("LEDC configured on GPIO %d at %d Hz.\n", LASER_PIN, currentFrequencyHz);
-}
+//===== LASER CONTROLS ==================================================================================================================
 
-void startLaserSignal(){
-  ledcWrite(LEDC_CHANNEL, LEDC_DUTY); // Turn on laser with specified duty cycle
-  Serial.printf("Laser signal started at %d Hz.\n", currentFrequencyHz);
-  ws.textAll("LASER_STARTED");
-}
-
-void stopLaserSignal(){
-  ledcWrite(LEDC_CHANNEL, 0); // Turn off laser
-  Serial.println("Laser signal stopped.");
-  ws.textAll("LASER_STOPPED");
-}
-
-void fireLaser() {
-  if(lastLaserFiredTime == 0 && !isDisabled()){
-    Serial.println("FIRE LASER");
-    lastLaserFiredTime = millis();
-    startLaserSignal();
-    ws.textAll("LASER_FIRED");
-  }
-}
-
+//===== TANK HIT
 bool isDisabled() {
   if (isHit && (millis() - hitTime < coolDown)) {
     return true;
@@ -376,39 +261,60 @@ bool isDisabled() {
   return false;
 }
 
-void whoHitMe(int frequency_int){
-  if (abs(frequency_int - PLAYER1_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
-      playerCode = "HIT_BY_P1";
-  } else if (abs(frequency_int - PLAYER2_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
-      playerCode = "HIT_BY_P2";
-  } else if (abs(frequency_int - PLAYER3_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
-      playerCode = "HIT_BY_P3";
-  } else if (abs(frequency_int - PLAYER4_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
-      playerCode = "HIT_BY_P4";
-  } else if (abs(frequency_int - PLAYER5_FREQUENCY_HZ) <= FREQUENCY_TOLERANCE_HZ) {
-      playerCode = "HIT_BY_P5";
-  }
-}
+//==== CONNECTION MAINTNENCE ============================================================================================================
+void initWebSocket() {
+  ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client,
+                AwsEventType type, void *arg, uint8_t *data, size_t len) {
 
-void checkHitSignalEnd(){
-  if(isHit&& !frequencyReady){
-    unsigned long now = millis();
-    if((now - measurementStartTime > laserFireDuration + 50) || 
-       (digitalRead(LASER_READ_HIT) == LOW && (now - measurementStartTime > 50))){
-        //Stop PCNT and read frequency
-        pcnt_counter_pause(PCNT_UNIT_0);
-        pcnt_get_counter_value(PCNT_UNIT_0, (int16_t*)&pulseCount); //Use defined unit and cast to int16_t*
-        measurementStopTime = now;
-        //Set processing flag
-        frequencyReady = true;
-        //Clear PCNT for next hit (will remain cleared until the next hitDetected ISR runs)
-        pcnt_counter_clear(PCNT_UNIT_0);
-        Serial.println("Hit signal end detected. Reading count.");
-    }
-  }
+    switch (type) {
+
+      case WS_EVT_CONNECT:
+        Serial.printf("Client #%u connected\n", client->id());
+        stopMotors();
+        sendStatusUpdate();
+        break;
+
+      case WS_EVT_DISCONNECT:
+        Serial.printf("Client #%u disconnected\n", client->id());
+        stopMotors();
+        break;
+
+      case WS_EVT_DATA: {
+        AwsFrameInfo *info = (AwsFrameInfo*)arg;
+
+        if (info->final && info->index == 0 && info->len == len) {
+          String cmd = "";
+          cmd.reserve(len);
+
+          for (size_t i = 0; i < len; i++) {
+            cmd += (char)data[i];
+          }
+
+          cmd.trim();
+          Serial.println("Received: " + cmd);
+          handleCommand(cmd);
+        }
+        break;
+      }
+
+    } // switch end
+  });
+
+  server.addHandler(&ws);
 }
 
 void sendStatusUpdate() {
   String msg = "STATUS:{\"clients\":" + String(ws.count()) + "}";
   ws.textAll(msg);
 }
+
+//Checks if Website uploaded correctly
+void initLittleFS() {
+  if (!LittleFS.begin()) {
+    Serial.println("LittleFS mount failed!");
+  } else {
+    Serial.println("LittleFS mounted successfully");
+  }
+}
+
+
